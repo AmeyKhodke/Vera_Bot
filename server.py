@@ -70,40 +70,58 @@ def push_context():
 
 @app.route('/v1/tick', methods=['POST'])
 def tick():
-    body = request.json
+    body = request.json or {}
     available_triggers = body.get('available_triggers', [])
     
     actions = []
-    
+    seen = set()  # Deduplication
+
     for trg_id in available_triggers:
-        trg_wrapper = context_store.get(f"trigger_{trg_id}")
-        if not trg_wrapper:
-            continue
-        trg = trg_wrapper.get("payload", {})
-        
-        merchant_id = trg.get("merchant_id")
-        merchant_wrapper = context_store.get(f"merchant_{merchant_id}")
-        if not merchant_wrapper:
-            continue
-        merchant = merchant_wrapper.get("payload", {})
-        
-        category_slug = merchant.get("category_slug")
-        category_wrapper = context_store.get(f"category_{category_slug}")
-        if not category_wrapper:
-            continue
-        category = category_wrapper.get("payload", {})
-        
-        customer_id = trg.get("customer_id")
-        customer = None
-        if customer_id:
-            customer_wrapper = context_store.get(f"customer_{customer_id}")
-            if customer_wrapper:
-                customer = customer_wrapper.get("payload")
-        
-        # Call the composer logic
-        composition = compose(category, merchant, trg, customer)
-        
-        if composition:
+        try:
+            # 🔹 Trigger
+            trg_wrapper = context_store.get(f"trigger_{trg_id}")
+            if not trg_wrapper:
+                continue
+            trg = trg_wrapper.get("payload", {})
+            
+            # 🔹 Merchant
+            merchant_id = trg.get("merchant_id")
+            merchant_wrapper = context_store.get(f"merchant_{merchant_id}")
+            if not merchant_wrapper:
+                continue
+            merchant = merchant_wrapper.get("payload", {})
+            
+            # 🔹 Category
+            category_slug = merchant.get("category_slug")
+            category_wrapper = context_store.get(f"category_{category_slug}")
+            if not category_wrapper:
+                continue
+            category = category_wrapper.get("payload", {})
+            
+            # 🔹 Customer
+            customer_id = trg.get("customer_id")
+            customer = None
+            if customer_id:
+                customer_wrapper = context_store.get(f"customer_{customer_id}")
+                if customer_wrapper:
+                    customer = customer_wrapper.get("payload")
+            
+            # 🔥 Deduplication (SAFE)
+            unique_key = f"{merchant_id}_{customer_id}"
+            if unique_key in seen:
+                continue
+            seen.add(unique_key)
+            
+            # 🔹 Compose
+            composition = compose(category, merchant, trg, customer)
+            if not composition:
+                continue
+            
+            # 🔥 LIGHT INTELLIGENCE (SAFE)
+            if trg.get("event_type") == "low_priority":
+                continue
+            
+            # 🔹 Action (STRICT FORMAT)
             actions.append({
                 "conversation_id": f"conv_{merchant_id}_{trg_id}",
                 "merchant_id": merchant_id,
@@ -111,13 +129,20 @@ def tick():
                 "send_as": composition.get("send_as", "vera"),
                 "trigger_id": trg_id,
                 "template_name": "vera_generic_v1",
-                "template_params": [merchant.get('identity', {}).get('name', ''), "...", "..."],
+                "template_params": [
+                    merchant.get('identity', {}).get('name', ''),
+                    category.get('name', ''),
+                    "Special Offer"
+                ],
                 "body": composition.get("body", ""),
                 "cta": composition.get("cta", "open_ended"),
                 "suppression_key": trg.get("suppression_key", ""),
                 "rationale": composition.get("rationale", "")
             })
-        
+
+        except Exception:
+            continue
+
     return jsonify({"actions": actions})
 
 @app.route('/v1/reply', methods=['POST'])
