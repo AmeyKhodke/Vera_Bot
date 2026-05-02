@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: vera-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn server:app
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: GROQ_API_KEY
+        sync: false # User will need to set this in Render dashboard
