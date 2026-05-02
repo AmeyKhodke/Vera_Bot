@@ -30,11 +30,11 @@ def healthz():
 def metadata():
     return jsonify({
         "team_name": "Team Vera AI",
-        "team_members": ["Magicpin Developer"],
-        "model": "claude-3-opus",
-        "approach": "Flask with Anthropic API",
-        "contact_email": "team@example.com",
-        "version": "1.0.0",
+        "team_members": ["Amey Khodke"],
+        "model": "llama-3.3-70b-versatile",
+        "approach": "Flask with Groq API (Llama 3)",
+        "contact_email": "ameykhodke@example.com",
+        "version": "1.1.0",
         "submitted_at": datetime.now(timezone.utc).isoformat()
     })
 
