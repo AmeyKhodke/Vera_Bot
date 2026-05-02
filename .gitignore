@@ -1,0 +1,61 @@
+# 🔐 Environment variables
+.env
+.env.*
+
+# 🐍 Virtual environment
+venv/
+.venv/
+env/
+ENV/
+
+# 🧠 Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 🧪 Pytest / coverage
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# 📦 Build / distribution
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# 📄 Logs
+*.log
+
+# 🗄️ Database files (local)
+*.sqlite3
+*.db
+
+# 🧰 IDE / Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 🖥️ OS files
+.DS_Store
+Thumbs.db
+
+# 📁 Alembic migrations (optional — keep if needed)
+# Uncomment below if you DON'T want migrations tracked
+# alembic/versions/
+
+# 🐳 Docker (optional overrides)
+docker-compose.override.yml
+
+# 📂 Uploads / media (if storing locally)
+uploads/
+media/
+
+# 🔑 Secrets / keys
+*.pem
+*.key
+
+# 📊 Jupyter notebooks checkpoints
+.ipynb_checkpoints/
