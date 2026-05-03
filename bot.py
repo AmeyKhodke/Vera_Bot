@@ -33,24 +33,12 @@ def compose(category: dict, merchant: dict, trigger: dict, customer: dict | None
 
     # Build the context payload for the LLM
     context_str = f"""
-<category_context>
-{json.dumps(category, indent=2)}
-</category_context>
-
-<merchant_context>
-{json.dumps(merchant, indent=2)}
-</merchant_context>
-
-<trigger_context>
-{json.dumps(trigger, indent=2)}
-</trigger_context>
+<category_context>{json.dumps(category)}</category_context>
+<merchant_context>{json.dumps(merchant)}</merchant_context>
+<trigger_context>{json.dumps(trigger)}</trigger_context>
 """
     if customer:
-        context_str += f"""
-<customer_context>
-{json.dumps(customer, indent=2)}
-</customer_context>
-"""
+        context_str += f"<customer_context>{json.dumps(customer)}</customer_context>"
 
     system_prompt = """
 You are an AI generating WhatsApp messages for 'Vera', an AI assistant for magicpin merchants.
@@ -76,7 +64,7 @@ Output nothing but the raw JSON object.
 
     try:
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile", # Groq model
+            model="llama-3.1-8b-instant",
             max_tokens=1000,
             temperature=0.0,
             response_format={"type": "json_object"},
@@ -118,15 +106,58 @@ def reply_compose(conversation_history: list, category: dict, merchant: dict, tr
             "rationale": "Error state"
         }
 
+    history = conversation_history
+    
+    # --- HARDCODED GUARDRAILS (No LLM needed for these) ---
+    if history:
+        last_msg = history[-1].get("body", "").lower()
+        
+        # 1. Hostility / STOP Handling — check incoming message
+        hostile_words = ["stop", "unsubscribe", "spam", "useless", "don't contact", "do not contact", "remove me"]
+        if any(word in last_msg for word in hostile_words):
+            return {"action": "end", "body": "", "cta": "none", "rationale": "Hostility/opt-out detected."}
+            
+        # 2. Auto-Reply Detection:
+        #    (a) Single message looks like a bot auto-responder
+        auto_reply_phrases = [
+            "thank you for contacting", "thank you for reaching out",
+            "we will get back", "our team will respond", "auto-reply",
+            "this is an automated", "out of office", "currently unavailable"
+        ]
+        if any(phrase in last_msg for phrase in auto_reply_phrases):
+            return {"action": "end", "body": "", "cta": "none", "rationale": "Auto-reply message detected."}
+        
+        #    (b) Last 2 user messages in same conversation are identical
+        user_msgs = [m.get("body", "") for m in history if m.get("role") in ("user", "merchant", "customer")]
+        if len(user_msgs) >= 2 and user_msgs[-1].strip().lower() == user_msgs[-2].strip().lower():
+            return {"action": "end", "body": "", "cta": "none", "rationale": "Repeated identical message — auto-reply."}
+        
+        # 3. Commitment / Intent Transition — merchant says "let's do it", "proceed", etc.
+        commitment_phrases = [
+            "ok lets do it", "ok let's do it", "lets do it", "let's do it",
+            "whats next", "what's next", "proceed", "go ahead", "sounds good",
+            "yes please", "confirmed", "book it", "do it", "sign me up"
+        ]
+        if any(phrase in last_msg for phrase in commitment_phrases):
+            merchant_name = merchant.get("identity", {}).get("owner_first_name", "")
+            greeting = f"Dr. {merchant_name}" if merchant_name else "there"
+            return {
+                "action": "send",
+                "body": f"Proceeding now, {greeting}! I'll draft the outreach messages and send you a preview shortly. You'll have full control to approve before anything goes live.",
+                "cta": "none",
+                "rationale": "Commitment detected — switching to ACTION mode immediately."
+            }
+    # -------------------------------------------------------
+
     context_data = {
         "category": category,
         "merchant": merchant,
         "trigger": trigger,
         "customer": customer,
-        "history": conversation_history
+        "history": history[-5:] # Only last 5 messages
     }
     
-    context_str = json.dumps(context_data, indent=2)
+    context_str = json.dumps(context_data)
     
     system_prompt = """
 You are 'Vera', an AI assistant for magicpin. You are continuing a conversation.
@@ -162,7 +193,7 @@ Output nothing but the raw JSON object.
 """
     try:
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="llama-3.1-8b-instant",
             max_tokens=800,
             temperature=0.0,
             response_format={"type": "json_object"},

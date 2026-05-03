@@ -182,8 +182,8 @@ def reply():
     # Store message in history
     conv = conversations.setdefault(conversation_id, [])
     conv.append({
-        "from": from_role, 
-        "msg": message
+        "role": from_role, 
+        "body": message
     })
     
     # Retrieve context for this conversation
@@ -223,8 +223,8 @@ def reply():
     
     if result.get("action") == "send":
         conv.append({
-            "from": "vera",
-            "msg": result.get("body", "")
+            "role": "vera",
+            "body": result.get("body", "")
         })
         
     return jsonify({
