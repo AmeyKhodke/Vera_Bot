@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # We initialize the client if GROQ_API_KEY is available.
-api_key = os.environ.get("GROQ_API_KEY")
+api_key = os.environ.get("GROQ_API_KEY", "").strip()
 client = Groq(api_key=api_key) if api_key else None
 
 def compose(category: dict, merchant: dict, trigger: dict, customer: dict | None) -> dict:
