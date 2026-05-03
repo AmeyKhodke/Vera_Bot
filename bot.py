@@ -56,22 +56,22 @@ def compose(category: dict, merchant: dict, trigger: dict, customer: dict | None
 You are an AI generating WhatsApp messages for 'Vera', an AI assistant for magicpin merchants.
 Your task is to write a single proactive WhatsApp message to a merchant (or to a customer on behalf of the merchant) based on the provided contexts.
 
-Constraints:
-1. Specificity: Use exact numbers, dates, headlines, or peer stats from the context. No generic "10% off" if a specific price exists.
-2. Voice match: Use the tone and allowed vocabulary from the CategoryContext.
-3. Merchant fit: Personalize based on the merchant's numbers, offers, and language preference. Mix English and Hindi if the preference is "hi-en mix" or "hi".
-4. Trigger relevance: Explicitly state *why* you are messaging them now based on the TriggerContext.
-5. Engagement compulsion: Use curiosity, social proof, loss aversion, or effort externalization. End with a single clear Call-to-Action (binary YES/STOP or simple).
-6. Target: If customer context is provided, message the customer directly acting as the merchant. Otherwise, message the merchant acting as Vera.
+Core Principles:
+1. SPECIFICITY: Use exact numbers, dates, headlines, or peer stats from the context. Instead of "your views are up", say "your views increased by 18% in the last 7 days". Use exact offer prices like "₹299". Use source citations if available (e.g., "JIDA Oct 2026").
+2. CLINICAL/BUSINESS ANCHOR: For Decision Quality, don't just ask to book. Provide a brief, high-value reason (e.g., "3-mo fluoride recall cuts caries 38% better" or "exam-stress bruxism spike in Nov").
+3. CATEGORY FIT: Use the tone and clinical/domain-specific vocabulary from CategoryContext. Use "Dr." for medical categories.
+4. MERCHANT FIT: Explicitly mention the merchant's locality (e.g., "in Lajpat Nagar") and the owner's name if provided. Honor language preferences (Hinglish for 'hi-en mix').
+5. TRIGGER RELEVANCE: Explicitly anchor the message on the trigger. Why are we talking NOW?
+6. ENGAGEMENT COMPULSION: Use curiosity, social proof (compare with peer stats), loss aversion, or effort externalization. Use a single, low-friction CTA.
 
 Output MUST be a valid JSON object with EXACTLY these keys:
 - "body": The WhatsApp message text
 - "cta": The call to action type (e.g. "open_ended", "binary", "none")
 - "send_as": Either "vera" (if messaging merchant) or "merchant_on_behalf" (if messaging customer)
 - "suppression_key": The suppression key from the trigger
-- "rationale": 1-2 sentence explanation of your design choices (why this message works)
+- "rationale": 1-2 sentence explanation of design choices.
 
-Output nothing but the raw JSON object, no markdown blocks.
+Output nothing but the raw JSON object.
 """
 
     try:
@@ -106,16 +106,9 @@ Output nothing but the raw JSON object, no markdown blocks.
             "rationale": f"Fallback response due to LLM error: {str(e)}"
         }
 
-def reply_compose(conversation_history: list) -> dict:
+def reply_compose(conversation_history: list, category: dict, merchant: dict, trigger: dict, customer: dict | None) -> dict:
     """
-    Given the conversation history, construct a prompt for the LLM to decide the next action.
-    Returns:
-        {
-            "action": "...",
-            "body": "...",
-            "cta": "...",
-            "rationale": "..."
-        }
+    Given the conversation history and context, decide the next action.
     """
     if not client:
         return {
@@ -125,37 +118,57 @@ def reply_compose(conversation_history: list) -> dict:
             "rationale": "Error state"
         }
 
-    history_str = json.dumps(conversation_history, indent=2)
+    context_data = {
+        "category": category,
+        "merchant": merchant,
+        "trigger": trigger,
+        "customer": customer,
+        "history": conversation_history
+    }
+    
+    context_str = json.dumps(context_data, indent=2)
+    
     system_prompt = """
-You are 'Vera', an AI assistant for magicpin merchants. You are replying to a merchant.
-You must analyze the conversation history and decide the next action.
+You are 'Vera', an AI assistant for magicpin. You are continuing a conversation.
+Your goal is to be helpful, concise, and action-oriented.
+
+Roles:
+- If the last message was from 'merchant', you are 'Vera' helping them.
+- If the last message was from 'customer', you are the 'Merchant' replying to your customer.
+
 Actions allowed:
-- "send": Send a reply message to the merchant.
-- "wait": Do not reply immediately, wait for more context.
-- "end": End the conversation (e.g., if the user is hostile, explicitly asked to stop, or if they are just an auto-responder bot).
+- "send": Send a reply.
+- "wait": Wait for more context (use if the user said "hold on" or similar).
+- "end": Stop the conversation (user said "stop", "unsubscribe", or if they are just an auto-responder).
 
 Rules:
-1. If the merchant sends an auto-reply repeatedly (like "Thank you for contacting us..."), you MUST output action "end" to stop the conversation and avoid infinite loops.
-2. If the merchant shows intent to proceed (e.g., "Ok lets do it. Whats next?"), you MUST output action "send" and the body should be ACTION-oriented (use words like "done", "sending", "proceed", "next"). Do NOT use qualifying words like "would you", "can you".
-3. If the merchant is hostile (e.g., "Stop messaging me", "spam"), you MUST output action "end", OR action "send" with an apology ("sorry", "apologize", "won't message again").
+1. TRIGGER GROUNDING: Always keep the original trigger in mind. If the conversation started about a "regulation change", don't suddenly switch to generic talk.
+2. INTENT DETECTION:
+   - If the user (customer) picks a slot or expresses intent to book, confirm the EXACT details (time, date, service) and say what happens next.
+   - If the merchant says "ok let's do it" or similar commitment, switch to ACTION immediately.
+   - ACTION MODE STRICTURE: In action mode, use words like "Done", "Processed", "Proceeding", "Next". 
+   - CRITICAL: DO NOT use qualifying phrases like "would you", "do you", "can you", "what if", or "how about" as these indicate you are still qualifying rather than acting.
+3. AUTO-REPLY DETECTION: If the last 2-3 messages from the user are identical or look like "Thank you for contacting...", use action "end".
+4. SPECIFICITY: Use numbers/data from the context.
+5. VOICE: Match the category tone and merchant language preference (English/Hindi mix).
 
-Output MUST be a valid JSON object with exactly these keys:
+Output MUST be a valid JSON object:
 - "action": "send", "wait", or "end"
-- "body": The message text (if action is "send", otherwise "")
+- "body": The message text (if action is "send")
 - "cta": "none", "open_ended", or "binary"
-- "rationale": "Why you chose this action"
+- "rationale": Why you chose this move.
 
 Output nothing but the raw JSON object.
 """
     try:
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            max_tokens=500,
+            max_tokens=800,
             temperature=0.0,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Conversation History:\n{history_str}"}
+                {"role": "user", "content": f"Context and History:\n{context_str}"}
             ]
         )
         return json.loads(response.choices[0].message.content.strip())
@@ -163,8 +176,8 @@ Output nothing but the raw JSON object.
         print(f"Error calling LLM for reply: {e}")
         return {
             "action": "send",
-            "body": "I'm having trouble connecting right now. Let's talk later.",
+            "body": "I'm processing that. I'll get back to you shortly.",
             "cta": "none",
-            "rationale": f"Fallback response due to LLM error: {str(e)}"
+            "rationale": f"Fallback due to error: {str(e)}"
         }
 

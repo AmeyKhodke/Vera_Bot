@@ -5,21 +5,32 @@ from bot import compose, reply_compose
 from dotenv import load_dotenv
 import os
 import json
+import threading
 
 load_dotenv()
 
 app = Flask(__name__)
 START_TIME = time.time()
 
-# Memory store
-context_store = {}   # Store f"{scope}_{context_id}" -> {scope, version, payload}
-conversations = {}   # Store conv_id -> [messages]
+# Global stores
+context_store = {}        # (scope, context_id) -> {version, payload}
+conversations = {}        # conversation_id -> [messages]
+conversation_contexts = {} # conversation_id -> {merchant_id, trigger_id, customer_id}
+store_lock = threading.Lock()
 
 @app.route('/v1/healthz', methods=['GET'])
 def healthz():
     counts = {"category": 0, "merchant": 0, "customer": 0, "trigger": 0}
-    for v in context_store.values():
-        counts[v["scope"]] = counts.get(v["scope"], 0) + 1
+    with store_lock:
+        items = list(context_store.values())
+    
+    for v in items:
+        scope = v.get("scope")
+        if scope in counts:
+            counts[scope] += 1
+        else:
+            counts[scope] = counts.get(scope, 0) + 1
+            
     return jsonify({
         "status": "ok",
         "uptime_seconds": int(time.time() - START_TIME),
@@ -49,18 +60,26 @@ def push_context():
     key = f"{scope}_{context_id}"
     cur = context_store.get(key)
     
-    if cur and cur.get("version") >= version:
+    if cur and cur.get("version") > version:
         return jsonify({
             "accepted": False, 
             "reason": "stale_version", 
             "current_version": cur["version"]
         }), 409
         
-    context_store[key] = {
-        "scope": scope,
-        "version": version,
-        "payload": payload
-    }
+    if cur and cur.get("version") == version:
+        return jsonify({
+            "accepted": True,
+            "ack_id": f"ack_{context_id}_v{version}",
+            "stored_at": datetime.now(timezone.utc).isoformat() + "Z"
+        })
+        
+    with store_lock:
+        context_store[key] = {
+            "scope": scope,
+            "version": version,
+            "payload": payload
+        }
     
     return jsonify({
         "accepted": True,
@@ -139,6 +158,14 @@ def tick():
                 "suppression_key": trg.get("suppression_key", ""),
                 "rationale": composition.get("rationale", "")
             })
+            
+            # Store context for reply grounding
+            with store_lock:
+                conversation_contexts[f"conv_{merchant_id}_{trg_id}"] = {
+                    "merchant_id": merchant_id,
+                    "trigger_id": trg_id,
+                    "customer_id": customer_id
+                }
 
         except Exception:
             continue
@@ -152,14 +179,47 @@ def reply():
     from_role = body.get('from_role')
     message = body.get('message')
     
+    # Store message in history
     conv = conversations.setdefault(conversation_id, [])
     conv.append({
         "from": from_role, 
         "msg": message
     })
     
-    # Call the reply_composer
-    result = reply_compose(conv)
+    # Retrieve context for this conversation
+    meta = conversation_contexts.get(conversation_id, {})
+    merchant_id = meta.get("merchant_id") or body.get("merchant_id")
+    trigger_id = meta.get("trigger_id")
+    customer_id = meta.get("customer_id") or body.get("customer_id")
+    
+    category = {}
+    merchant = {}
+    trigger = {}
+    customer = None
+    
+    with store_lock:
+        if merchant_id:
+            m_wrap = context_store.get(f"merchant_{merchant_id}")
+            if m_wrap:
+                merchant = m_wrap.get("payload", {})
+                cat_slug = merchant.get("category_slug")
+                if cat_slug:
+                    c_wrap = context_store.get(f"category_{cat_slug}")
+                    if c_wrap:
+                        category = c_wrap.get("payload", {})
+        
+        if trigger_id:
+            t_wrap = context_store.get(f"trigger_{trigger_id}")
+            if t_wrap:
+                trigger = t_wrap.get("payload", {})
+        
+        if customer_id:
+            cust_wrap = context_store.get(f"customer_{customer_id}")
+            if cust_wrap:
+                customer = cust_wrap.get("payload", {})
+
+    # Call the reply_composer with context
+    result = reply_compose(conv, category, merchant, trigger, customer)
     
     if result.get("action") == "send":
         conv.append({
