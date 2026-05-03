@@ -31,7 +31,7 @@ load_dotenv()
 LLM_PROVIDER = "groq"
 
 # Your API key (loaded from .env)
-LLM_API_KEY = os.environ.get("GROQ_API_KEY", "")
+LLM_API_KEY = "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"
 
 # Model to use
 LLM_MODEL = "llama-3.1-8b-instant"
