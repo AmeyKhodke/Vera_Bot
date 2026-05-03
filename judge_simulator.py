@@ -26,8 +26,8 @@ BOT_URL = "http://localhost:8080"
 # Choose your LLM provider: "openai", "anthropic", "gemini", "deepseek", "groq", "ollama", "openrouter"
 LLM_PROVIDER = "groq"
 
-# Your API key (paste your key here)
-LLM_API_KEY = "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"  # <-- PUT YOUR API KEY HERE
+# Your API key (loaded from .env)
+LLM_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
 # Model to use (leave empty for default, or specify like "gpt-4o", "claude-3-5-sonnet-20241022", etc.)
 LLM_MODEL = "llama-3.3-70b-versatile"  # <-- Optional: specify model or leave empty for default
@@ -49,6 +49,8 @@ urllib.request.install_opener(opener)
 # =============================================================================
 
 import os
+from dotenv import load_dotenv
+load_dotenv()
 import sys
 import json
 import time
